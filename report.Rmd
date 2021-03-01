@@ -1,0 +1,151 @@
+---
+title: "StatComp Project 1: Numerical Statistics"
+author: "Your Name (s1801322, JianqiaoSun)"
+date: ""
+output:
+  html_document:
+    number_sections: yes
+  pdf_document:
+    number_sections: yes
+header-includes:
+  - \newcommand{\bm}[1]{\boldsymbol{#1}}
+  - \newcommand{\mat}[1]{\begin{bmatrix}#1\end{bmatrix}}
+---
+
+```{r setup, include = FALSE}
+# Modify this setup code chunk to set options
+# or add extra packages etc if needed,
+# but keep the echo=FALSE,eval=TRUE default settings here.
+
+# Set default code chunk options
+knitr::opts_chunk$set(
+  echo = FALSE,
+  eval = TRUE
+)
+
+suppressPackageStartupMessages(library(tidyverse))
+theme_set(theme_bw())
+```
+
+```{r code=readLines("code.R")}
+```
+
+```{r code=readLines("my_code.R")}
+```
+
+# Confidence interval approximation assessment
+
+2. For any given observation vector $y$ and confidence leve $1-\alpha$, type 1 CI of $\theta$ is $(\bar{y}-z_{1-\alpha/2}\sqrt{\bar{y}/n},\bar{y}+z_{1-\alpha/2}\sqrt{\bar{y}/n})$, while type 2 CI of $\theta$ is $(\sqrt{\bar{y}}-z_{1-\alpha/2}/\sqrt{4n},\sqrt{\bar{y}}+z_{1-\alpha/2}/\sqrt{4n})$. Therefore, for the CI of $\lambda$, the type 2 should be $$ \left((\sqrt{\bar{y}}-z_{1-\alpha/2}/\sqrt{4n})^2,(\sqrt{\bar{y}}+z_{1-\alpha/2}/\sqrt{4n})^2\right)=\left(\bar{y}+\frac{z_{1-\alpha/2}^2}{4n}-\frac{\sqrt{\bar{y}}z_{1-\alpha/2}}{\sqrt{n}},\bar{y}+\frac{z_{1-\alpha/2}^2}{4n}+\frac{\sqrt{\bar{y}}z_{1-\alpha/2}}{\sqrt{n}}\right). $$
+Consequently, if we ignore the cases where the intervals extend below 0, both the widths of the $\lambda$-intervals for type 1 and 2 are $2z_{1-\alpha/2}\sqrt{\bar{y}/n}$.
+
+```{r}
+library(tidyverse)
+library(DescTools)
+```
+
+4. With nominal confidence level $1-\alpha=90\%, m=100000, n=2, \lambda=3$, 
+```{r,echo=TRUE,eval=TRUE}
+m = 100000
+n = 2
+lambda = 3
+alpha = 0.1
+simulated_data = tidy_multi_pois_CI(m,n,lambda,alpha)
+simulated_data %>% group_by(Type) %>% summarise(CoverProb=sum(Lower<lambda & Upper>lambda)/m)
+```
+The results suggest that the coverage probability for type 2 confidence interval is closest to the nominal level, while type 1 CI results in under-coverage and type 3 over-coverage.
+
+5. We plot the empirical CDFs for the interval widths as below.
+```{r,echo=TRUE,eval=TRUE}
+simulated_data = simulated_data %>% mutate(width = Upper-Lower)
+ggplot(simulated_data, aes(x = width)) + stat_ecdf(aes(group = factor(Type), colour = factor(Type)))
+simulated_data %>% group_by(Type) %>% summarise(median=median(width))
+```
+From the results, we can see that the interval widths of type 1 and 2 are the same, despite some extreme cases where the CIs extend below 0. This is the conclusion we obtain in (2). Furthermore, the widths of type 3 CI are generally longer than those of type 1 and 2. As the coverage probability of type 2 CI is closer to the nominal level than type 3 CI, we consider type 2 is the best choice among three alternatives.
+
+# Archaeology in the Baltic sea
+
+Example of code run but not shown (except for the result)
+due to default chunk options. Remember to include the chunk in the
+code appendix below.
+```{r some-code}
+# Load and display the archaeology data set
+Y <- arch_data(4)
+knitr::kable(Y)
+```
+
+3. The more efficient importance sampler is implemented as below.
+```{r,echo=TRUE,eval=TRUE}
+arch_alternative <- function(K,Y,xi,a,b) {
+  # matrix of minimum allowed N for each j, repeated K times
+  N_min <- matrix(rep(pmax(Y[, 1], Y[, 2]), each = K), K, J)
+  xi_sample <- 1 / (1 + 4 * N_min)
+  xi_sample <- matrix(xi_sample, K, J, byrow = TRUE)
+  
+  # Sample values and call log_prob_NY for each sample,
+  # store N-values in a K-by-J matrix, and log(p_NY)-values in a vector log_PY
+  N <- matrix(rgeom(K*J, prob = xi_sample), K, J) + N_min
+  log_PY <- c()
+  for (k in 1:K) {
+    log_PY[k] = lbeta(a+sum(Y), b+2*sum(N)-sum(Y)) - lbeta(a,b)
+    for (j in 1:J) {
+      log_PY[k] = log_PY[k] + log(dgeom(N[k,j],xi_sample[k,j])) + lchoose(N[k,j],Y[j,1]) + lchoose(N[k,j],Y[j,2])
+    }
+  }
+  # Subtract the sampling log-probabilities
+  Log_Weights = log_PY - rowSums(dgeom(N - N_min, prob = xi_sample, log = TRUE))
+  Log_Weights = Log_Weights - max(Log_Weights)
+  return(as.data.frame(cbind(N,Log_Weights)))
+}
+```
+
+4. First, we use \texttt{arch_importance} to sample 4 cases, adding one excavation at each time.
+```{r,echo=TRUE,eval=TRUE,warning=FALSE}
+xi = 1/1001
+a = b = 1/2
+Y1 = arch_data(1)
+Y2 = arch_data(2)
+Y3 = arch_data(3)
+Y4 = arch_data(4)
+K = 100000
+sampler1 = arch_importance(K,Y1,xi,a,b)
+sampler2 = arch_importance(K,Y2,xi,a,b)
+sampler3 = arch_importance(K,Y3,xi,a,b)
+sampler4 = arch_importance(K,Y4,xi,a,b)
+```
+Next, set the credible level at $95\%$, we calculate the intervals of $N_1$.
+```{r,echo=TRUE,eval=TRUE}
+c(Quantile(sampler1$N1, weights = exp(sampler1$Log_Weights), probs = 0.025, type = 1), Quantile(sampler1$N1, weights = exp(sampler1$Log_Weights), probs = 0.975, type = 1))
+c(Quantile(sampler2$N1, weights = exp(sampler2$Log_Weights), probs = 0.025, type = 1), Quantile(sampler2$N1, weights = exp(sampler2$Log_Weights), probs = 0.975, type = 1))
+c(Quantile(sampler3$N1, weights = exp(sampler3$Log_Weights), probs = 0.025, type = 1), Quantile(sampler3$N1, weights = exp(sampler3$Log_Weights), probs = 0.975, type = 1))
+c(Quantile(sampler4$N1, weights = exp(sampler4$Log_Weights), probs = 0.025, type = 1), Quantile(sampler4$N1, weights = exp(sampler1$Log_Weights), probs = 0.975, type = 1))
+```
+From the results, we can see that adding excavations does not help us much for estimating $N_j$. Perhaps this is due to the large variation among the 4 excavations. Other excavations cannot provide much information for $N_1$.
+
+5. Set the credible level at $95\%$, we also calculate the intervals of $\phi$ for 
+```{r,echo=TRUE,eval=TRUE}
+c(Quantile(sampler1$Phi, weights = exp(sampler1$Log_Weights), probs = 0.025, na.rm = TRUE, type = 1), Quantile(sampler1$Phi, weights = exp(sampler1$Log_Weights), probs = 0.975, na.rm = TRUE, type = 1))
+c(Quantile(sampler4$Phi, weights = exp(sampler4$Log_Weights), probs = 0.025, na.rm = TRUE, type = 1), Quantile(sampler4$Phi, weights = exp(sampler4$Log_Weights), probs = 0.975, na.rm = TRUE, type = 1))
+```
+The credible intervals for $\phi$ are well improved by adding more excavations. This is because we assume the same average detection probability $\phi$ for every excavation.
+
+# Code appendix
+
+```{r code-appendix, include=FALSE}
+# Change the code chunk options to display
+# but not evaluate the code chunks in the appendix
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = FALSE
+)
+```
+
+## Function definitions
+
+```{r code=readLines("my_code.R")}
+```
+
+## Analysis code
+
+Example for how to show code from a previous code chunk
+```{r ref.label="some-code"}
+```
